@@ -22,4 +22,4 @@ jobs:
 
       - name: Run Python script
         run: |
-          python script.py
+          python Sites_Performance.py
