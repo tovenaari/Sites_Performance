@@ -1,757 +1,735 @@
-"""
-SiteScorer - Denver Site Speed Analysis
-======================================
-Author: [Your Name]
-Version: 1.0
-Last Modified: 2024-03-19
-
-Description:
------------
-This script analyzes website performance and finds competitors within a 1km radius.
-It uses Google PageSpeed Insights, Google Maps API, OpenAI for classification,
-and SEMrush for SEO metrics.
-
-Features:
-- Cleans URLs (removes http://, https://, www.)
-- Analyzes mobile and desktop performance
-- Finds nearby competitors
-- Classifies business type using GPT
-- Outputs results to Google Sheets
-- Shows detailed progress tracking
-- Analyzes SEO metrics via SEMrush
-- Checks Local SEO presence
-
-Usage:
-------
-1. Set up Google API credentials
-2. Configure spreadsheet ID and tab names
-3. Run with dry_run=True for testing structure
-4. Run normally for full analysis
-
-Dependencies:
-------------
-- google-auth
-- google-api-python-client
-- gspread
-- requests
-- simple_openai_client
-- tqdm
-"""
-
 import requests
-import gspread
 import time
 import os
-import pickle
-import logging
-from datetime import datetime
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from simple_openai_client import ask_openai
-from tqdm import tqdm
-import ssl
-import socket
-from urllib.parse import urlparse
+import random
+import threading
 import csv
-from io import StringIO
-
-# === CONFIGURATION ===
-# API Keys
-GOOGLE_API_KEY_FILE = "Google_api_Key.txt"
-SEMRUSH_API_KEY_FILE = "semrush_api_key.txt"
-
-# Country to SEMrush DB mapping
-COUNTRY_TO_SEMRUSH_DB = {
-    "Puerto Rico": "us",
-    "Virgin Islands, U.S.": "us",
-    "Cayman Islands": "us",
-    "Costa Rica": "mx",
-    "Panama": "mx",
-    "Bahamas": "us",
-    "Dominican Republic": "mx",
-    "Austria": "de",
-    "Sri Lanka": "in",
-    "Jamaica": "us",
-    "French Polynesia": "au",
-    "Cyprus": "gr",
-    "Croatia": "it",
-    "Saint Lucia": "us",
-    "Slovenia": "it",
-    "Malta": "it",
-    "Slovakia": "de",
-    "Guadeloupe": "fr",
-    "Aruba": "us",
-    "Netherlands Antilles": "nl",
-    "Turks and Caicos Islands": "us",
-    "Saint Martin/Sint Maarten": "fr",
-    "Ecuador": "co",
-    "Honduras": "mx",
-    "Belize": "mx",
-    "Lithuania": "pl",
-    "Isle of Man": "uk",
-    "Bulgaria": "gr",
-    "Vanuatu": "au",
-    "Barbados": "us",
-    "Luxembourg": "fr",
-    "Bermuda": "us",
-    "Estonia": "pl",
-    "Curacao": "us",
-    "Jersey": "uk",
-    "Virgin Islands, British": "uk",
-    "Trinidad and Tobago": "us",
-    "Guatemala": "mx",
-    "Antigua and Barbuda": "us",
-    "Tanzania": "za",
-    "Latvia": "pl",
-    "Grenada": "us",
-    "Lebanon": "ae",
-    "Guam": "us",
-    "Greenland": "us",
-    "Reunion": "fr",
-    "Albania": "it",
-    "Saint Kitts and Nevis": "us",
-    "Morocco": "fr",
-    "Dominica": "us",
-    # Second list (ISO code: Country)
-    "United Arab Emirates": "ae",
-    "Argentina": "ar",
-    "Australia": "au",
-    "Belgium": "be",
-    "Brazil": "br",
-    "Canada": "ca",
-    "Switzerland": "ch",
-    "Chile": "cl",
-    "China": "cn",
-    "Colombia": "co",
-    "Czech Republic": "cz",
-    "Germany": "de",
-    "Denmark": "dk",
-    "Spain": "es",
-    "Finland": "fi",
-    "France": "fr",
-    "Greece": "gr",
-    "Hong Kong": "hk",
-    "Hungary": "hu",
-    "Ireland": "ie",
-    "Italy": "it",
-    "Japan": "jp",
-    "South Korea": "kr",
-    "Mexico": "mx",
-    "Netherlands": "nl",
-    "Norway": "no",
-    "New Zealand": "nz",
-    "Peru": "pe",
-    "Poland": "pl",
-    "Portugal": "pt",
-    "Romania": "ro",
-    "Saudi Arabia": "sa",
-    "Sweden": "se",
-    "Singapore": "sg",
-    "Thailand": "th",
-    "United Kingdom": "uk",
-    "USA": "us",
-    "Vietnam": "vn",
-}
-
-# Google Sheets
-SPREADSHEET_ID = "1FRIFXGLqOQatV7mtg9n9vEieWWztfJJSQuWG-4uML4E"
-INPUT_TAB = "Sites To Check"
-OUTPUT_TAB = "SiteSpeed"
-
-# Analysis Settings
-MAX_DOMAINS = 2  # Maximum number of domains to process
-RADIUS_METERS = 5000  # 5km radius for competitor search
-DRY_RUN = False  # Set to False for real analysis
-COMPETITORS_PER_DOMAIN = 10  # Number of competitors to analyze per domain
-
-# Column Mappings
-SHORTNAME_COL = 1  # Column A
-WEBSITE_COL = 2    # Column B
-REGION_COL = 5     # Column E
-
-# SEMrush Settings
-SEMRUSH_DATABASES = {
-    'uk': 'uk',      # UK & Ireland
-    'de': 'de',      # Germany
-    'fr': 'fr',      # France
-    'es': 'es',      # Spain
-    'it': 'it',      # Italy
-    'nl': 'nl',      # Netherlands
-    'pl': 'pl',      # Poland
-    'ru': 'ru',      # Russia
-    'tr': 'tr',      # Turkey
-    'gr': 'gr',      # Greece
-    'us': 'us'       # USA (default)
-}
+from bs4 import BeautifulSoup
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # === CONFIG ===
-def read_api_key(path="semrush_api_key.txt"):
-    # Lista di encoding da provare
-    encodings = ['utf-8-sig', 'utf-16', 'ascii', 'latin1']
-    
-    for encoding in encodings:
-        try:
-            with open(path, "r", encoding=encoding) as f:
-                key = f.read().strip()
-                
-            # Validate the key format
-            if not key or len(key) < 10 or '%' in key:
-                continue
-                
-            print(f"✅ API key letta correttamente con encoding {encoding}")
-            print(f"🔑 Chiave: {key[:5]}...{key[-5:]}")
-            return key
-            
-        except UnicodeDecodeError:
-            continue
-        except Exception as e:
-            print(f"❌ Errore nella lettura dell'API key: {str(e)}")
-            return None
-    
-    print("❌ Non è stato possibile leggere l'API key con nessun encoding supportato")
-    return None
-
-# Load API keys
-SEMRUSH_API_KEY = read_api_key(SEMRUSH_API_KEY_FILE)
-if not SEMRUSH_API_KEY:
-    raise Exception("Failed to load SEMrush API key")
-
-with open(GOOGLE_API_KEY_FILE, "r") as f:
+with open("Google_api_Key.txt", "r") as f:
     GOOGLE_API_KEY = f.read().strip()
 
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
+INPUT_CSV = "input/sites.csv"  # CSV file to read from
+OUTPUT_CSV = "output/website_audit_results.csv"  # CSV file to write to
+MAX_BUSINESSES = None    # Processa tutti i business (nessun limite)
 
-# === PROGRESS TRACKING ===
-class ProgressTracker:
-    def __init__(self, total_steps=100):
-        self.total_steps = total_steps
-        self.current_step = 0
-        self.pbar = tqdm(total=total_steps, desc="Overall Progress", 
-                        bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]')
-        
-    def update(self, steps, message):
-        self.current_step += steps
-        self.pbar.update(steps)
-        self.pbar.set_description(f"{message} ({self.current_step}%)")
-        
-    def close(self):
-        self.pbar.close()
+# === RELIABILITY CONFIG ===
+BATCH_SIZE = 5              # Write to CSV every N businesses
+RETRY_ATTEMPTS = 3          # Number of retry attempts for API calls
+RETRY_DELAY = 2             # Base delay between retries (seconds)
+API_DELAY = 1               # Delay between API calls to avoid rate limiting
+GLOBAL_TIMEOUT = 120        # Global timeout per business (2 minutes for testing)
 
-# === SHEETS ===
-def get_google_credentials():
-    creds = None
-    if os.path.exists('token_gsheets_user.pickle'):
-        with open('token_gsheets_user.pickle', 'rb') as token:
-            creds = pickle.load(token)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            raise Exception("⚠️ Invalid credentials")
-    return creds
+# === FILTERING OPTIONS ===
+# REGION FILTER
+# REGION_FILTER = "EMEA"      # Regione selezionata
+# REGION_FILTER = "AMER"      # Regione commentata
+# REGION_FILTER = "APAC"      # Regione commentata
+REGION_FILTER = None         # No region filtering
 
-def clean_url(url):
-    """Clean URL by removing http://, https://, www. and any trailing slashes"""
-    if not url:
-        return ""
-    # Remove protocol and www
-    cleaned = url.replace('https://', '').replace('http://', '').replace('www.', '')
-    # Remove trailing slash and everything after it
-    cleaned = cleaned.split('/')[0]
-    return cleaned
+# ACCOUNT TIER FILTER
+# ACCOUNT_TIER_FILTER = ["2", "3", "4"]    # Filtra solo per questi tier
+# ACCOUNT_TIER_FILTER = "0"   # Filter only tier 0 accounts
+# ACCOUNT_TIER_FILTER = "1"   # Filter only tier 1 accounts
+# ACCOUNT_TIER_FILTER = "2"   # Filter only tier 2 accounts
+# ACCOUNT_TIER_FILTER = "3"   # Filter only tier 3 accounts
+ACCOUNT_TIER_FILTER = None   # No tier filtering
 
-def setup_sheets():
-    creds = get_google_credentials()
-    client = gspread.authorize(creds)
-    spreadsheet = client.open_by_key(SPREADSHEET_ID)
+# FH_SITE FILTER
+# FH_SITE_FILTER = "No"         # Filter only non-FareHarbor sites
+# FH_SITE_FILTER = "Yes"      # Filter only FareHarbor sites
+FH_SITE_FILTER = None       # No filtering
+
+# TIER 0 EXCLUSION
+EXCLUDE_TIER_0 = False        # False = include tier 0 accounts
+# EXCLUDE_TIER_0 = True       # True = exclude tier 0 accounts
+
+# Expected headers for output CSV
+EXPECTED_HEADERS = [
+    "shortname", "website", "region", "rating_google", "reviews",
+    "field_lcp", "field_cls", "field_inp", "field_fcp",
+    "field_speed_problem", "field_ux_problem", "perf_score", "issues", "category",
+    "accessibility", "best_practices", "seo",
+    "concatenated_reviews", "title",
+    "mobile", "mobile_lcp", "mobile_cls", "mobile_inp",
+    "desktop", "desktop_lcp", "desktop_cls", "desktop_inp",
+    "lab_speed_problem", "lab_ux_problem",
+    "fh_score", "rating",
+    "img_sav_kb", "js_sav_kb", "css_sav_kb",
+    "photo_url", "fh_site", "account_tier", "latitude", "longitude"
+]
+
+def create_robust_session():
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=RETRY_ATTEMPTS,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["HEAD", "GET", "OPTIONS"],
+        backoff_factor=RETRY_DELAY
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+def safe_api_call(func, *args, **kwargs):
+    for attempt in range(RETRY_ATTEMPTS): 
+        try:
+            print(f"🔄 API call attempt {attempt + 1}/{RETRY_ATTEMPTS}")
+            result = func(*args, **kwargs)
+            time.sleep(API_DELAY)
+            return result
+        except Exception as e:
+            if attempt == RETRY_ATTEMPTS - 1:
+                print(f"❌ API call failed after {RETRY_ATTEMPTS} attempts: {e}")
+                raise
+            print(f"⚠️ API call attempt {attempt + 1} failed: {e}")
+            time.sleep(RETRY_DELAY * (2 ** attempt))
+    return None
+
+def load_csv_input(input_path=INPUT_CSV):
+    """Load businesses from CSV file"""
+    businesses = []
     try:
-        output_sheet = spreadsheet.worksheet(OUTPUT_TAB)
-    except gspread.exceptions.WorksheetNotFound:
-        output_sheet = spreadsheet.add_worksheet(title=OUTPUT_TAB, rows="1000", cols="14")
-    input_sheet = spreadsheet.worksheet(INPUT_TAB)
-    # Set header with PageSpeed metrics (Mobile + Desktop)
-    output_sheet.clear()
-    output_sheet.update(values=[["URL cleaned", "shortname", "competitors", "competitor_reviews", "Mobile Score", "Mobile LCP", "Mobile CLS", "Mobile INP", "Desktop Score", "Desktop LCP", "Desktop CLS", "Desktop INP"]], range_name="A1:L1")
-    return input_sheet, output_sheet
-
-# === GPT CLASSIFICATION ===
-def classify_with_openai(name, summary, reviews):
-    review_texts = " ".join([r.get("text", "") for r in reviews[:3]])
-    prompt = f"""
-You are a classification engine. Based on the business name, description, and sample reviews, determine what kind of tour or activity this business offers. Respond with a short phrase (1–3 words max) like 'bike tour', 'snorkeling', 'food tour', 'boat rental', etc. Do not explain.
-
-Business Name: {name}
-Description: {summary}
-Reviews: {review_texts}
-Category:
-"""
-    try:
-        category = ask_openai(prompt, model="gpt-4", temperature=0, max_tokens=20)
-        print(f"GPT classified {name} as: {category}")
-        return category
+        with open(input_path, newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                domain = row.get("domain", "").strip()
+                region = row.get("region", "").strip()
+                fh_site = row.get("fh_site", "").strip()
+                account_tier = row.get("account_tier", "").strip()
+                
+                # Apply filters
+                if not domain:
+                    continue
+                    
+                # Region filter
+                if REGION_FILTER and region != REGION_FILTER:
+                    continue
+                    
+                # Account tier filter
+                if ACCOUNT_TIER_FILTER and account_tier not in ACCOUNT_TIER_FILTER:
+                    continue
+                    
+                # FH site filter
+                if FH_SITE_FILTER and fh_site != FH_SITE_FILTER:
+                    continue
+                    
+                # Tier 0 exclusion
+                if EXCLUDE_TIER_0 and account_tier == "0":
+                    continue
+                    
+                businesses.append({
+                    "domain": domain,
+                    "region": region,
+                    "fh_site": fh_site,
+                    "account_tier": account_tier
+                })
+                
+                # Limit to MAX_BUSINESSES (if set)
+                if MAX_BUSINESSES and len(businesses) >= MAX_BUSINESSES:
+                    break
+                    
+        print(f"✅ Loaded {len(businesses)} businesses from CSV")
+        return businesses
+    except FileNotFoundError:
+        print(f"❌ Input CSV file not found: {input_path}")
+        return []
     except Exception as e:
-        print(f"OpenAI Error: {e}")
-        return None
-
-def classify_multiple_categories_with_openai(name, reviews):
-    all_reviews = " ".join(reviews)
-    prompt = f'''
-You are a classification engine. Based on the business name and ALL the reviews, list up to 5 categories or types of tours/activities this business offers. Respond with a comma-separated list of short phrases (e.g. 'food tour, wine tasting, walking tour'). Do not explain.
-
-Business Name: {name}
-Reviews: {all_reviews}
-Categories:
-'''
-    try:
-        categories = ask_openai(prompt, model="gpt-4", temperature=0, max_tokens=50)
-        return [cat.strip() for cat in categories.split(",") if cat.strip()]
-    except Exception as e:
-        print(f"OpenAI Error: {e}")
+        print(f"❌ Error reading CSV file: {e}")
         return []
 
-# === GOOGLE MAPS ===
+def export_to_csv(rows, output_path=OUTPUT_CSV):
+    """Export results to CSV file"""
+    import os
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    if not rows:
+        print("⚠️ No data to export")
+        return
+    headers = EXPECTED_HEADERS
+    with open(output_path, mode='w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"✅ Exported {len(rows)} rows to {output_path}")
+
 def find_place(query):
+    session = create_robust_session()
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
     params = {"query": query, "key": GOOGLE_API_KEY}
-    response = requests.get(url, params=params).json()
-    if not response.get("results"):
-        print(f"No results found for: {query}")
+    def api_call():
+        response = session.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        return response.json()
+    try:
+        response_data = safe_api_call(api_call)
+        return response_data["results"][0] if response_data.get("results") else None
+    except Exception as e:
+        print(f"❌ Google Maps search failed for '{query}': {e}")
         return None
-    print(f"Found place: {response['results'][0]['name']}")
-    return response["results"][0]
 
 def get_place_details(place_id):
+    session = create_robust_session()
     url = "https://maps.googleapis.com/maps/api/place/details/json"
-    fields = "name,website,reviews,geometry/location,user_ratings_total"
+    fields = "name,website,rating,user_ratings_total,reviews,editorial_summary,geometry/location,photos"
     params = {"place_id": place_id, "fields": fields, "key": GOOGLE_API_KEY}
-    response = requests.get(url, params=params).json()
-    return response.get("result", {})
-
-def get_nearby_competitors(lat, lng, keyword):
-    url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-    params = {
-        "location": f"{lat},{lng}",
-        "radius": 5000,
-        "keyword": keyword,
-        "key": GOOGLE_API_KEY
-    }
-    response = requests.get(url, params=params).json()
-    return response.get("results", [])
-
-# === PAGESPEED ===
-def get_pagespeed_data(url, strategy):
+    def api_call():
+        response = session.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        return response.json()
     try:
-        print(f"Requesting PageSpeed data for {url} ({strategy})")
-        r = requests.get("https://www.googleapis.com/pagespeedonline/v5/runPagespeed", params={
-            "url": url, "strategy": strategy, "key": GOOGLE_API_KEY
-        })
-        
-        if r.status_code != 200:
-            print(f"PageSpeed API returned status code {r.status_code} for {url}")
-            return None
-            
-        data = r.json()
-        try:
-            score = round(data["lighthouseResult"]["categories"]["performance"]["score"] * 100)
-            audits = data["lighthouseResult"]["audits"]
-            lcp = audits["largest-contentful-paint"]["displayValue"]
-            cls = audits["cumulative-layout-shift"]["displayValue"]
-            inp = audits.get("interactive", {}).get("displayValue", "n/a")
-            mobile_friendly = audits.get("mobile-friendly", {}).get("score", 0) == 1
-            
-            print(f"Successfully got PageSpeed data for {url} ({strategy}): Score={score}")
-            return {
-                "score": score,
-                "lcp": lcp,
-                "cls": cls,
-                "inp": inp,
-                "mobile_friendly": mobile_friendly
-            }
-        except KeyError as e:
-            print(f"Missing expected data in PageSpeed response for {url}: {str(e)}")
-            return None
+        response_data = safe_api_call(api_call)
+        return response_data.get("result", {})
     except Exception as e:
-        print(f"Failed to get PageSpeed data for {url}: {str(e)}")
-        return None
+        print(f"❌ Google Maps details failed for place_id '{place_id}': {e}")
+        return {}
 
-def calculate_fareharbor_score(mobile_data, desktop_data):
-    """
-    Calculate FareHarbor score based on mobile and desktop PageSpeed metrics
-    Returns a score between 0 and 100
-    """
-    # Calculate base score as average of mobile and desktop scores
-    base_score = (mobile_data["score"] + desktop_data["score"]) / 2
-    penalties = 0
+def get_photo_url(place_details):
+    photos = place_details.get("photos", [])
+    if photos:
+        photo_reference = photos[0]["photo_reference"]
+        return f"https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference={photo_reference}&key={GOOGLE_API_KEY}"
+    return "https://via.placeholder.com/400x300?text=No+Image"
 
-    # Apply penalties for both mobile and desktop
-    for lcp in [mobile_data["lcp"], desktop_data["lcp"]]:
-        if "s" in lcp and float(lcp.replace("s", "").strip()) > 2.5:
-            penalties += 10
+def get_concatenated_reviews(reviews):
+    if not reviews:
+        return "n/a"
+    review_texts = []
+    for review in reviews[:5]:
+        text = review.get("text", "").strip()
+        if text:
+            if len(text) > 200:
+                text = text[:200] + "..."
+            review_texts.append(text)
+    return ", ".join(review_texts) if review_texts else "n/a"
 
-    for cls in [mobile_data["cls"], desktop_data["cls"]]:
-        if float(cls) > 0.1:
-            penalties += 5
+def classify_speed_lab(mobile_score):
+    # mobile_score è 0-100 (lab)
+    if mobile_score == "n/a":      return "⚪ n/a"
+    mobile_score = float(mobile_score)
+    if mobile_score < 50:          return "🔴 High (Slow)"
+    if mobile_score < 75:          return "🟡 Borderline"
+    return "🟢 Stable"
 
-    for inp in [mobile_data["inp"], desktop_data["inp"]]:
-        if extract_ms(inp) > 200:
-            penalties += 5
-
-    # Calculate final score
-    final_score = max(0, min(100, round(base_score - penalties)))
-    
-    return final_score
-
-def extract_ms(val):
-    """Extract milliseconds from a time value string"""
+def classify_speed_field(field_lcp):
+    # field_lcp è una stringa tipo "2.2 s" oppure "n/a"
     try:
-        return float(val.replace("ms", "").replace("s", "").strip()) * (1000 if "s" in val else 1)
+        lcp = float(field_lcp.split()[0])
     except:
-        return 0
+        return "⚪ n/a"
+    if lcp > 4:                    return "🔴 High (Slow)"
+    if lcp > 2.5:                  return "🟡 Borderline"
+    return "🟢 Stable"
 
-def calculate_fareharbor_rating(score):
-    """
-    Calculate FareHarbor rating based on score
-    Returns: "Good", "Needs Improvement", or "Poor"
-    """
-    if score >= 90:
-        return "Good"
-    elif score >= 50:
-        return "Needs Improvement"
+def classify_ux_lab(mobile_cls, mobile_inp):
+    try:
+        cls = float(mobile_cls)
+        inp = float(mobile_inp.replace("ms",""))
+    except:
+        return "⚪ n/a"
+    if cls > 0.1 or inp > 300:     return "🔴 High"
+    if cls > 0.07 or inp > 200:    return "🟡 Moderate"
+    return "🟢 Stable"
+
+def classify_ux_field(field_cls, field_inp):
+    try:
+        cls = float(field_cls)
+        inp = float(field_inp.replace("ms",""))
+    except:
+        return "⚪ n/a"
+    if cls > 0.1 or inp > 300:     return "🔴 High"
+    if cls > 0.07 or inp > 200:    return "🟡 Moderate"
+    return "🟢 Stable"
+
+def analyze_domain(domain):
+    print(f"🌐 Analyzing domain: {domain}")
+    if not domain.startswith(('http://', 'https://')):
+        domain_with_https = 'https://' + domain
     else:
-        return "Poor"
+        domain_with_https = domain
+    print(f"📍 Step 1/6: Searching '{domain}' on Google Maps...")
+    place = find_place(domain)
+    google_data = {
+        "name": domain,
+        "rating_google": "n/a",
+        "reviews": "n/a",
+        "concatenated_reviews": "n/a",
+        "photo_url": "n/a",
+        "latitude": "n/a",
+        "longitude": "n/a"
+    }
+    if place:
+        print(f"📍 Step 2/6: Getting place details...")
+        details = get_place_details(place["place_id"])
+        location = details.get("geometry", {}).get("location", {})
+        lat, lng = location.get("lat"), location.get("lng")
+        google_data.update({
+            "name": details.get("name", domain),
+            "rating_google": details.get("rating", "n/a"),
+            "reviews": details.get("user_ratings_total", "n/a"),
+            "concatenated_reviews": get_concatenated_reviews(details.get("reviews", [])),
+            "photo_url": get_photo_url(details),
+            "latitude": lat,
+            "longitude": lng
+        })
+    else:
+        print(f"❌ No Google Maps result found for {domain}")
+    print(f"⚡ Step 3/6: Running PageSpeed analysis for: {domain_with_https}")
+    try:
+        ps = analyze_site(domain_with_https)
+        print(f"✅ PageSpeed analysis completed successfully")
+    except Exception as e:
+        print(f"❌ PageSpeed analysis failed: {e}")
+        ps = {
+            "mobile": "n/a", "mobile_lcp": "n/a", "mobile_cls": "n/a", "mobile_inp": "n/a",
+            "desktop": "n/a", "desktop_lcp": "n/a", "desktop_cls": "n/a", "desktop_inp": "n/a",
+            "field_lcp": "n/a", "field_cls": "n/a", "field_inp": "n/a", "field_fcp": "n/a",
+            "field_speed_problem": "⚪ n/a", "field_ux_problem": "⚪ n/a",
+            "lab_speed_problem": "⚪ n/a", "lab_ux_problem": "⚪ n/a",
+            "perf_score": "n/a", "accessibility": "n/a", "best_practices": "n/a", "seo": "n/a", "fh_score": "n/a", "rating": "Error", "issues": f"API Fail: {str(e)}",
+            "img_sav_kb": "n/a", "js_sav_kb": "n/a", "css_sav_kb": "n/a"
+        }
+    return {
+        "shortname": domain,
+        "website": domain_with_https,
+        "region": "",
+        "rating_google": google_data["rating_google"],
+        "reviews": google_data["reviews"],
+        "field_lcp": ps["field_lcp"],
+        "field_cls": ps["field_cls"],
+        "field_inp": ps["field_inp"],
+        "field_fcp": ps["field_fcp"],
+        "field_speed_problem": ps["field_speed_problem"],
+        "field_ux_problem": ps["field_ux_problem"],
+        "perf_score": ps["perf_score"],
+        "issues": ps["issues"],
+        "category": google_data["name"],
+        "accessibility": ps["accessibility"],
+        "best_practices": ps["best_practices"],
+        "seo": ps["seo"],
+        "concatenated_reviews": google_data["concatenated_reviews"],
+        "title": extract_title(domain_with_https),
+        "mobile": ps["mobile"],
+        "mobile_lcp": ps["mobile_lcp"],
+        "mobile_cls": ps["mobile_cls"],
+        "mobile_inp": ps["mobile_inp"],
+        "desktop": ps["desktop"],
+        "desktop_lcp": ps["desktop_lcp"],
+        "desktop_cls": ps["desktop_cls"],
+        "desktop_inp": ps["desktop_inp"],
+        "lab_speed_problem": ps["lab_speed_problem"],
+        "lab_ux_problem": ps["lab_ux_problem"],
+        "fh_score": ps["fh_score"],
+        "rating": ps["rating"],
+        "img_sav_kb": ps["img_sav_kb"],
+        "js_sav_kb":  ps["js_sav_kb"],
+        "css_sav_kb": ps["css_sav_kb"],
+        "photo_url": google_data["photo_url"],
+        "fh_site": "",
+        "account_tier": "",
+        "latitude": google_data["latitude"],
+        "longitude": google_data["longitude"]
+    }
 
-def calculate_rankings(sites_data):
-    """Calculate rankings for each metric"""
-    metrics = [
-        'Mobile Score', 'Desktop Score', 'FareHarbor Score',
-        'Mobile LCP', 'Desktop LCP', 'Mobile CLS', 'Desktop CLS'
+def extract_title(url):
+    try:
+        html = requests.get(url, timeout=5).text
+        soup = BeautifulSoup(html, "html.parser")
+        return soup.title.string.strip() if soup.title else "n/a"
+    except:
+        return "n/a"
+
+def check_site_accessibility(url):
+    session = create_robust_session()
+    urls_to_try = [
+        url,
+        url.replace('https://', 'http://'),
+        url.replace('www.', ''),
+        'https://www.' + url.split('://')[-1] if '://' in url else 'https://www.' + url
     ]
-    
-    rankings = {}
-    for metric in metrics:
-        # Convert string values to float for comparison
-        values = []
-        for site in sites_data:
-            value = site.get(metric, '0')
-            if isinstance(value, str):
-                # Remove 's' from time values and convert to float
-                value = float(value.replace('s', '').strip())
-            values.append(value)
-        
-        # Sort values and create ranking
-        sorted_values = sorted(values, reverse=True)
-        rankings[metric] = {
-            'values': values,
-            'sorted': sorted_values,
-            'percentiles': [sorted_values.index(v) / len(values) * 100 for v in values]
-        }
-    
-    return rankings
-
-def check_ssl_security(url):
-    """
-    Check SSL/TLS security of a website
-    Returns a dictionary with security metrics
-    """
-    try:
-        # Parse URL to get domain
-        parsed_url = urlparse(url)
-        domain = parsed_url.netloc
-        
-        # Create SSL context
-        context = ssl.create_default_context()
-        with socket.create_connection((domain, 443)) as sock:
-            with context.wrap_socket(sock, server_hostname=domain) as ssock:
-                cert = ssock.getpeercert()
-                
-                # Get SSL version
-                ssl_version = ssock.version()
-                
-                # Check certificate expiration
-                not_after = ssl.cert_time_to_seconds(cert['notAfter'])
-                not_before = ssl.cert_time_to_seconds(cert['notBefore'])
-                current_time = time.time()
-                
-                # Calculate days until expiration
-                days_until_expiry = (not_after - current_time) / (24 * 3600)
-                
-                return {
-                    'ssl_version': ssl_version,
-                    'days_until_expiry': round(days_until_expiry, 1),
-                    'issuer': cert['issuer'][0][0][1],
-                    'is_valid': current_time >= not_before and current_time <= not_after
-                }
-    except Exception as e:
-        print(f"SSL check failed for {url}: {str(e)}")
-        return None
-
-def check_security_headers(url):
-    """
-    Check security headers of a website
-    Returns a dictionary with security headers status
-    """
-    try:
-        response = requests.get(url, timeout=10)
-        headers = response.headers
-        
-        security_headers = {
-            'Strict-Transport-Security': headers.get('Strict-Transport-Security', 'Not Set'),
-            'X-Content-Type-Options': headers.get('X-Content-Type-Options', 'Not Set'),
-            'X-Frame-Options': headers.get('X-Frame-Options', 'Not Set'),
-            'X-XSS-Protection': headers.get('X-XSS-Protection', 'Not Set'),
-            'Content-Security-Policy': headers.get('Content-Security-Policy', 'Not Set'),
-            'Referrer-Policy': headers.get('Referrer-Policy', 'Not Set')
-        }
-        
-        # Calculate security score (0-100)
-        score = 0
-        if security_headers['Strict-Transport-Security'] != 'Not Set':
-            score += 20
-        if security_headers['X-Content-Type-Options'] == 'nosniff':
-            score += 20
-        if security_headers['X-Frame-Options'] != 'Not Set':
-            score += 20
-        if security_headers['X-XSS-Protection'] != 'Not Set':
-            score += 20
-        if security_headers['Content-Security-Policy'] != 'Not Set':
-            score += 20
-            
-        security_headers['security_score'] = score
-        
-        return security_headers
-    except Exception as e:
-        print(f"Security headers check failed for {url}: {str(e)}")
-        return None
-
-def get_database_from_country(country):
-    """
-    Return the SEMrush database code for a given country name.
-    """
-    return COUNTRY_TO_SEMRUSH_DB.get(country, "us")  # Default to 'us' if not found
-
-def get_semrush_domain_overview(domain, region='us'):
-    """
-    Get domain overview metrics from SEMrush
-    Returns a dictionary with domain metrics (overview for the domain)
-    """
-    try:
-        url = "https://api.semrush.com/"
-        params = {
-            "type": "domain_ranks",
-            "key": SEMRUSH_API_KEY,
-            "domain": domain,
-            "database": region,  # Use the region passed in
-            "export_columns": "Dn,Rk,Or,Ot,Ov,Bk,Dn",
-            "display_limit": 50
-        }
-        print(f"Calling SEMrush API for domain: {domain}")
-        print(f"Using {region} database for global metrics")
-        print(f"Requesting 50 results")
-        response = requests.get(url, params=params)
-        print(f"SEMrush API Response Status: {response.status_code}")
-        print(f"SEMrush API Response: {response.text[:200]}...")  # Print first 200 chars of response
-        if response.status_code != 200:
-            print(f"SEMrush API returned status code {response.status_code}")
-            return None
-        # Parse the CSV response
+    for attempt_url in urls_to_try:
         try:
-            reader = csv.DictReader(StringIO(response.text), delimiter=';')
-            rows = list(reader)  # Get all rows
-            if not rows:
-                print(f"No data returned for domain: {domain}")
-                return None
-            print(f"Found {len(rows)} results")
-            # Return only the first result (domain overview)
-            row = rows[0]
-            return {
-                'authority_score': row.get('Rk', '0'),
-                'organic_keywords': row.get('Or', '0'),
-                'organic_traffic': row.get('Ot', '0'),
-                'organic_traffic_value': row.get('Ov', '0'),
-                'backlinks': row.get('Bk', '0'),
-                'referring_domains': row.get('Dn', '0'),
-                'domain': row.get('Dn', '')
-            }
+            response = session.head(attempt_url, timeout=10, allow_redirects=True)
+            if response.status_code < 400:
+                print(f"✅ Site accessible: {attempt_url}")
+                return attempt_url
         except Exception as e:
-            print(f"Error parsing SEMrush response for {domain}: {str(e)}")
-            print(f"Raw response: {response.text}")
-            return None
-    except Exception as e:
-        print(f"Failed to get SEMrush data for {domain}: {str(e)}")
-        return None
+            print(f"⚠️ Site not accessible: {attempt_url} - {e}")
+            continue
+    print(f"❌ Site not accessible: {url}")
+    return None
 
-def check_local_seo(place_details):
-    """
-    Check Local SEO metrics from Google Places data
-    Returns a dictionary with local SEO metrics
-    """
-    try:
-        # Check if business has Google Maps presence
-        has_maps = bool(place_details.get("place_id"))
-        
-        # Get NAP consistency
-        name = place_details.get("name", "")
-        address = place_details.get("formatted_address", "")
-        phone = place_details.get("formatted_phone_number", "")
-        
-        nap_consistency = all([name, address, phone])
-        
-        # Get number of reviews (already in place_details)
-        reviews_count = place_details.get("user_ratings_total", 0)
-        
-        return {
-            'has_maps': has_maps,
-            'nap_consistency': nap_consistency,
-            'reviews_count': reviews_count
-        }
-    except Exception as e:
-        print(f"Failed to check Local SEO: {str(e)}")
-        return None
+def get_pagespeed_data(url, strategy):
+    session = create_robust_session()
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    urls_to_try = [
+        url,
+        url.replace('https://', 'http://'),
+        url.replace('www.', ''),
+        'https://www.' + url.split('://')[-1] if '://' in url else 'https://www.' + url
+    ]
+    for attempt_url in urls_to_try:
+        try:
+            def api_call():
+                response = session.get("https://www.googleapis.com/pagespeedonline/v5/runPagespeed", 
+                                      params={"url": attempt_url, "strategy": strategy, "key": GOOGLE_API_KEY},
+                                      timeout=60)
+                response.raise_for_status()
+                return response.json()
+            data = safe_api_call(api_call)
+            # Extract field data (real user data)
+            field_lcp = field_cls = field_inp = field_fcp = "n/a"
+            try:
+                metrics = data.get("loadingExperience", {}).get("metrics", {})
+                if "LARGEST_CONTENTFUL_PAINT_MS" in metrics:
+                    field_lcp = str(round(metrics["LARGEST_CONTENTFUL_PAINT_MS"]["percentile"] / 1000, 1)) + " s"
+                if "CUMULATIVE_LAYOUT_SHIFT_SCORE" in metrics:
+                    field_cls = str(metrics["CUMULATIVE_LAYOUT_SHIFT_SCORE"]["percentile"] / 1000)
+                if "INP" in metrics:
+                    field_inp = str(round(metrics["INP"]["percentile"])) + " ms"
+                if "FIRST_CONTENTFUL_PAINT_MS" in metrics:
+                    field_fcp = str(round(metrics["FIRST_CONTENTFUL_PAINT_MS"]["percentile"] / 1000, 1)) + " s"
+            except:
+                pass
+            if data and "lighthouseResult" in data:
+                score = round(data["lighthouseResult"]["categories"]["performance"]["score"] * 100)
+                
+                # Safely extract accessibility, best practices, and SEO scores
+                accessibility_score = "n/a"
+                best_practices_score = "n/a"
+                seo_score = "n/a"
+                
+                try:
+                    if "accessibility" in data["lighthouseResult"]["categories"]:
+                        accessibility_score = int(data["lighthouseResult"]["categories"]["accessibility"]["score"] * 100)
+                except:
+                    pass
+                
+                try:
+                    if "best-practices" in data["lighthouseResult"]["categories"]:
+                        best_practices_score = int(data["lighthouseResult"]["categories"]["best-practices"]["score"] * 100)
+                except:
+                    pass
+                
+                try:
+                    if "seo" in data["lighthouseResult"]["categories"]:
+                        seo_score = int(data["lighthouseResult"]["categories"]["seo"]["score"] * 100)
+                except:
+                    pass
+                
+                audits = data["lighthouseResult"]["audits"]
+                opps = extract_opportunity_savings(audits)
+                lcp = audits["largest-contentful-paint"]["displayValue"]
+                cls = audits["cumulative-layout-shift"]["displayValue"]
+                inp = audits.get("interactive", {}).get("displayValue", "n/a")
+                return {"score": score, "lcp": lcp, "cls": cls, "inp": inp,
+                        "img_sav": opps["img"], "js_sav": opps["js"], "css_sav": opps["css"],
+                        "field_lcp": field_lcp, "field_cls": field_cls, "field_inp": field_inp, "field_fcp": field_fcp,
+                        "accessibility": accessibility_score,
+                        "best_practices": best_practices_score,
+                        "seo": seo_score}
+        except Exception as e:
+            print(f"⚠️ PageSpeed failed for {attempt_url} ({strategy}): {e}")
+            continue
+    print(f"❌ PageSpeed analysis failed for all URL variations: {url}")
+    return None
+
+def extract_opportunity_savings(audits):
+    mapping = {
+        "uses-optimized-images":       "img",
+        "uses-responsive-images":      "img",
+        "efficient-animated-content":  "img",
+        "modern-image-formats":        "img",
+        "unused-javascript":           "js",
+        "unminified-javascript":       "js",
+        "unused-css-rules":            "css",
+        "unminified-css":              "css",
+    }
+    savings = {"img": 0, "js": 0, "css": 0}
+    for audit_id, target in mapping.items():
+        audit = audits.get(audit_id)
+        if audit and audit.get("details", {}).get("type") == "opportunity":
+            bytes_saved = audit["details"].get("overallSavingsBytes", 0)
+            savings[target] += round(bytes_saved / 1024, 1)
+    return savings
 
 def analyze_site(website):
-    cleaned_url = clean_url(website)
-    if not cleaned_url:
-        print(f"Invalid URL: {website}")
-        return None
-    place = find_place(cleaned_url)
-    if not place:
-        print(f"Could not find place for: {cleaned_url}")
-        return None
-    place_details = get_place_details(place["place_id"])
-    if not place_details:
-        print(f"Could not get details for: {cleaned_url}")
-        return None
-    # Get shortname from Google Places name, fallback to cleaned_url
-    shortname = place_details.get("name") or cleaned_url
-    # Calcola PageSpeed per il sito principale (mobile + desktop)
-    main_reviews = place_details.get('user_ratings_total', 0)
-    main_ps_mobile = get_pagespeed_data(f"https://{cleaned_url}", "mobile")
-    main_ps_desktop = get_pagespeed_data(f"https://{cleaned_url}", "desktop")
-    main_mobile_score = main_ps_mobile.get("score", '') if main_ps_mobile else ''
-    main_mobile_lcp = main_ps_mobile.get("lcp", '') if main_ps_mobile else ''
-    main_mobile_cls = main_ps_mobile.get("cls", '') if main_ps_mobile else ''
-    main_mobile_inp = main_ps_mobile.get("inp", '') if main_ps_mobile else ''
-    main_desktop_score = main_ps_desktop.get("score", '') if main_ps_desktop else ''
-    main_desktop_lcp = main_ps_desktop.get("lcp", '') if main_ps_desktop else ''
-    main_desktop_cls = main_ps_desktop.get("cls", '') if main_ps_desktop else ''
-    main_desktop_inp = main_ps_desktop.get("inp", '') if main_ps_desktop else ''
-    # Get competitors
-    competitors = []
-    if place_details.get("geometry", {}).get("location"):
-        lat = place_details["geometry"]["location"]["lat"]
-        lng = place_details["geometry"]["location"]["lng"]
-        reviews = [r.get("text", "") for r in place_details.get("reviews", [])]
-        categories = classify_multiple_categories_with_openai(shortname, reviews)
-        seen_names = set()
-        seen_websites = set()
-        for cat in categories:
-            nearby = get_nearby_competitors(lat, lng, cat)
-            for place in nearby:
-                comp_name = place.get('name', '')
-                comp_place_id = place.get('place_id', '')
-                if not comp_place_id or comp_name in seen_names:
-                    continue
-                comp_details = get_place_details(comp_place_id)
-                comp_website = comp_details.get('website', '')
-                if comp_website and comp_website in seen_websites:
-                    continue
-                seen_names.add(comp_name)
-                if comp_website:
-                    seen_websites.add(comp_website)
-                user_ratings_total = comp_details.get('user_ratings_total', 0)
-                # Calcola PageSpeed solo se c'è un sito web (mobile + desktop)
-                mobile_score = mobile_lcp = mobile_cls = mobile_inp = ''
-                desktop_score = desktop_lcp = desktop_cls = desktop_inp = ''
-                if comp_website:
-                    ps_mobile = get_pagespeed_data(comp_website, "mobile")
-                    ps_desktop = get_pagespeed_data(comp_website, "desktop")
-                    if ps_mobile:
-                        mobile_score = ps_mobile.get("score", '')
-                        mobile_lcp = ps_mobile.get("lcp", '')
-                        mobile_cls = ps_mobile.get("cls", '')
-                        mobile_inp = ps_mobile.get("inp", '')
-                    if ps_desktop:
-                        desktop_score = ps_desktop.get("score", '')
-                        desktop_lcp = ps_desktop.get("lcp", '')
-                        desktop_cls = ps_desktop.get("cls", '')
-                        desktop_inp = ps_desktop.get("inp", '')
-                competitors.append({
-                    'name': comp_name,
-                    'website': comp_website,
-                    'place_id': comp_place_id,
-                    'user_ratings_total': user_ratings_total,
-                    'mobile_score': mobile_score,
-                    'mobile_lcp': mobile_lcp,
-                    'mobile_cls': mobile_cls,
-                    'mobile_inp': mobile_inp,
-                    'desktop_score': desktop_score,
-                    'desktop_lcp': desktop_lcp,
-                    'desktop_cls': desktop_cls,
-                    'desktop_inp': desktop_inp
-                })
-        competitors = [c for c in competitors if clean_url(c.get('website', '')) != cleaned_url and c.get('name', '') != shortname]
-    # Ordina per numero di Google Reviews decrescente e prendi i top 10
-    competitors = [c for c in competitors if c.get('user_ratings_total') is not None]
-    competitors = sorted(competitors, key=lambda x: x['user_ratings_total'], reverse=True)[:COMPETITORS_PER_DOMAIN]
-    all_results = []
-    # Riga per il sito principale (URL cleaned, shortname, competitors = shortname, competitor_reviews, metriche)
-    all_results.append({
-        'URL cleaned': cleaned_url,
-        'shortname': shortname,
-        'competitors': shortname,
-        'competitor_reviews': main_reviews,
-        'Mobile Score': main_mobile_score,
-        'Mobile LCP': main_mobile_lcp,
-        'Mobile CLS': main_mobile_cls,
-        'Mobile INP': main_mobile_inp,
-        'Desktop Score': main_desktop_score,
-        'Desktop LCP': main_desktop_lcp,
-        'Desktop CLS': main_desktop_cls,
-        'Desktop INP': main_desktop_inp
-    })
-    # Riga per ciascun competitor
-    for competitor in competitors:
-        row = {
-            'URL cleaned': cleaned_url,
-            'shortname': shortname,
-            'competitors': clean_url(competitor.get('website', '')),
-            'competitor_reviews': competitor.get('user_ratings_total', 0),
-            'Mobile Score': competitor.get('mobile_score', ''),
-            'Mobile LCP': competitor.get('mobile_lcp', ''),
-            'Mobile CLS': competitor.get('mobile_cls', ''),
-            'Mobile INP': competitor.get('mobile_inp', ''),
-            'Desktop Score': competitor.get('desktop_score', ''),
-            'Desktop LCP': competitor.get('desktop_lcp', ''),
-            'Desktop CLS': competitor.get('desktop_cls', ''),
-            'Desktop INP': competitor.get('desktop_inp', '')
+    accessible_url = check_site_accessibility(website)
+    if not accessible_url:
+        return {
+            "mobile": "n/a", "mobile_lcp": "n/a", "mobile_cls": "n/a", "mobile_inp": "n/a",
+            "desktop": "n/a", "desktop_lcp": "n/a", "desktop_cls": "n/a", "desktop_inp": "n/a",
+            "field_lcp": "n/a", "field_cls": "n/a", "field_inp": "n/a", "field_fcp": "n/a",
+            "field_speed_problem": "⚪ n/a", "field_ux_problem": "⚪ n/a",
+            "lab_speed_problem": "⚪ n/a", "lab_ux_problem": "⚪ n/a",
+            "perf_score": "n/a", "accessibility": "n/a", "best_practices": "n/a", "seo": "n/a", "fh_score": "n/a", "rating": "Error", "issues": "Site not accessible",
+            "img_sav_kb": "n/a", "js_sav_kb": "n/a", "css_sav_kb": "n/a"
         }
-        all_results.append(row)
-    return all_results
+    mobile = get_pagespeed_data(accessible_url, "mobile")
+    desktop = get_pagespeed_data(accessible_url, "desktop")
+    if not mobile or not desktop:
+        return {
+            "mobile": "n/a", "mobile_lcp": "n/a", "mobile_cls": "n/a", "mobile_inp": "n/a",
+            "desktop": "n/a", "desktop_lcp": "n/a", "desktop_cls": "n/a", "desktop_inp": "n/a",
+            "field_lcp": "n/a", "field_cls": "n/a", "field_inp": "n/a", "field_fcp": "n/a",
+            "field_speed_problem": "⚪ n/a", "field_ux_problem": "⚪ n/a",
+            "lab_speed_problem": "⚪ n/a", "lab_ux_problem": "⚪ n/a",
+            "perf_score": "n/a", "accessibility": "n/a", "best_practices": "n/a", "seo": "n/a", "fh_score": "n/a", "rating": "Error", "issues": "PageSpeed API Fail",
+            "img_sav_kb": "n/a", "js_sav_kb": "n/a", "css_sav_kb": "n/a"
+        }
+    base_score = (mobile["score"] + desktop["score"]) / 2
+    perf_score = round(base_score)
+    mobile_lcp_seconds = float(mobile["lcp"].replace("s", "").strip()) if "s" in mobile["lcp"] else 0
+    desktop_lcp_seconds = float(desktop["lcp"].replace("s", "").strip()) if "s" in desktop["lcp"] else 0
+    avg_lcp = (mobile_lcp_seconds + desktop_lcp_seconds) / 2
+    mobile_cls = float(mobile["cls"])
+    desktop_cls = float(desktop["cls"])
+    avg_cls = (mobile_cls + desktop_cls) / 2
+    mobile_inp_ms = float(mobile["inp"].replace("ms", "").strip()) if "ms" in mobile["inp"] else 0
+    desktop_inp_ms = float(desktop["inp"].replace("ms", "").strip()) if "ms" in desktop["inp"] else 0
+    avg_inp = (mobile_inp_ms + desktop_inp_ms) / 2
+    penalties = 0
+    if avg_lcp > 2.5:
+        penalties += 5
+    if avg_cls > 0.1:
+        penalties += 3
+    if avg_inp > 300:
+        penalties += 2.5
+    bonus = 0
+    if mobile["score"] > 75:
+        bonus += 2
+    if desktop["score"] > 80:
+        bonus += 2
+    final_score = max(0, min(100, round(base_score - penalties + bonus)))
+    rating = "Good" if final_score >= 90 else "Needs Improvement" if final_score >= 50 else "Poor"
+    issues = []
+    if avg_lcp > 2.5:
+        issues.append(f"High LCP (avg: {avg_lcp:.1f}s)")
+    if avg_cls > 0.1:
+        issues.append(f"Layout Shift (avg: {avg_cls:.3f})")
+    if avg_inp > 300:
+        issues.append(f"Poor INP (avg: {avg_inp:.0f}ms)")
+    if mobile["score"] > 75:
+        issues.append(f"Mobile bonus (+2)")
+    if desktop["score"] > 80:
+        issues.append(f"Desktop bonus (+2)")
+    
+    # Calculate classification values
+    lab_speed   = classify_speed_lab(mobile["score"])
+    field_speed = classify_speed_field(mobile["field_lcp"])
+    lab_ux      = classify_ux_lab(mobile["cls"], mobile["inp"])
+    field_ux    = classify_ux_field(mobile["field_cls"], mobile["field_inp"])
+    
+    return {
+        "mobile": mobile["score"],
+        "mobile_lcp": mobile["lcp"],
+        "mobile_cls": mobile["cls"],
+        "mobile_inp": mobile["inp"],
+        "desktop": desktop["score"],
+        "desktop_lcp": desktop["lcp"],
+        "desktop_cls": desktop["cls"],
+        "desktop_inp": desktop["inp"],
+        "field_lcp": mobile["field_lcp"],
+        "field_cls": mobile["field_cls"],
+        "field_inp": mobile["field_inp"],
+        "field_fcp": mobile["field_fcp"],
+        "field_speed_problem": field_speed,
+        "field_ux_problem": field_ux,
+        "lab_speed_problem": lab_speed,
+        "lab_ux_problem": lab_ux,
+        "perf_score": perf_score,
+        "accessibility": mobile.get("accessibility", "n/a") if mobile.get("accessibility") != "n/a" else "n/a",
+        "best_practices": mobile.get("best_practices", "n/a") if mobile.get("best_practices") != "n/a" else "n/a",
+        "seo": mobile.get("seo", "n/a") if mobile.get("seo") != "n/a" else "n/a",
+        "fh_score": final_score,
+        "rating": rating,
+        "issues": ", ".join(issues) if issues else "None",
+        "img_sav_kb":  mobile["img_sav"] + desktop["img_sav"],
+        "js_sav_kb":   mobile["js_sav"]  + desktop["js_sav"],
+        "css_sav_kb":  mobile["css_sav"] + desktop["css_sav"]
+    }
+
+def run_with_timeout(func, *args, timeout=GLOBAL_TIMEOUT, **kwargs):
+    """Run a function with a timeout using threading (Windows compatible)"""
+    result = [None]
+    exception = [None]
+    
+    def target():
+        try:
+            result[0] = func(*args, **kwargs)
+        except Exception as e:
+            exception[0] = e
+    
+    thread = threading.Thread(target=target)
+    thread.daemon = True
+    thread.start()
+    thread.join(timeout)
+    
+    if thread.is_alive():
+        print(f"⏰ Operation timed out after {timeout} seconds")
+        raise TimeoutError(f"Operation timed out after {timeout} seconds")
+    
+    if exception[0]:
+        raise exception[0]
+    
+    return result[0]
+
+def print_progress_bar(current, total, width=50):
+    """Print a progress bar in the terminal"""
+    progress = current / total
+    filled_width = int(width * progress)
+    bar = '█' * filled_width + '░' * (width - filled_width)
+    percentage = progress * 100
+    print(f"\r📊 Progress: [{bar}] {current}/{total} ({percentage:.1f}%)", end='', flush=True)
 
 def main():
-    print("Starting site competitor extraction with metrics")
-    input_sheet, output_sheet = setup_sheets()
-    all_rows = input_sheet.get_all_values()
-    data_rows = all_rows[1:]  # Skip header row
-    emea_domains = []
-    for row in data_rows:
-        if len(row) >= REGION_COL and row[REGION_COL-1].lower() == 'emea':
-            emea_domains.append(row[WEBSITE_COL-1])
-            if len(emea_domains) >= MAX_DOMAINS:
-                break
-    if not emea_domains:
-        print("No EMEA domains found in the sheet")
+    print(f"🔍 Reading businesses from '{INPUT_CSV}'")
+    if REGION_FILTER:
+        print(f"🔍 Filtering for region: {REGION_FILTER}")
+    else:
+        print(f"🔍 No region filtering applied")
+    if EXCLUDE_TIER_0:
+        print(f"🔍 Excluding tier 0 accounts")
+    else:
+        print(f"🔍 Including tier 0 accounts")
+    if ACCOUNT_TIER_FILTER:
+        print(f"🔍 Additional filter: account_tier = {ACCOUNT_TIER_FILTER}")
+    else:
+        print(f"🔍 No additional account tier filtering applied")
+    if FH_SITE_FILTER:
+        print(f"🔍 Additional filter: fh_site = {FH_SITE_FILTER}")
+    else:
+        print(f"🔍 No additional fh_site filtering applied")
+    
+    businesses = load_csv_input()
+    if not businesses:
+        print(f"❌ No businesses found")
+        if REGION_FILTER:
+            print(f"   for region {REGION_FILTER}")
+        if ACCOUNT_TIER_FILTER:
+            print(f"   and account_tier {ACCOUNT_TIER_FILTER}")
+        if EXCLUDE_TIER_0:
+            print(f"   (tier 0 accounts are excluded)")
+        if FH_SITE_FILTER:
+            print(f"   and fh_site {FH_SITE_FILTER}")
         return
-    for website in emea_domains:
-        print(f"Processing website: {website}")
-        results = analyze_site(website)
-        if results:
-            for row in results:
-                output_row = [row.get('URL cleaned', ''), row.get('shortname', ''), row.get('competitors', ''), row.get('competitor_reviews', ''), row.get('Mobile Score', ''), row.get('Mobile LCP', ''), row.get('Mobile CLS', ''), row.get('Mobile INP', ''), row.get('Desktop Score', ''), row.get('Desktop LCP', ''), row.get('Desktop CLS', ''), row.get('Desktop INP', '')]
-                print(f"Writing data to sheet: {output_row}")
-                output_sheet.append_row(output_row)
-    print("Done.")
+    
+    total_businesses = len(businesses)
+    print(f"✅ Found {total_businesses} business(es) to analyze")
+    
+    processed_count = 0
+    failed_count = 0
+    
+    print("\n" + "="*60)
+    print("🚀 STARTING ANALYSIS")
+    print("="*60)
+    
+    results = []
+    
+    for index, business in enumerate(businesses, 1):
+        # Print progress bar
+        print_progress_bar(index, total_businesses)
+        
+        print(f"\n\n🏢 Processing: {business['domain']} (Region: {business['region']}, FH: {business['fh_site']}, Tier: {business['account_tier']})")
+        print(f"📍 Step 1/6: Analyzing domain: {business['domain']}")
+        
+        try:
+            # Run analysis with timeout
+            try:
+                row = run_with_timeout(analyze_domain, business['domain'], timeout=GLOBAL_TIMEOUT)
+            except TimeoutError:
+                print(f"⏰ Analysis timed out for {business['domain']}, creating error row")
+                row = {
+                    "shortname": business['domain'],
+                    "website": f"https://{business['domain']}",
+                    "region": "",
+                    "rating_google": "n/a",
+                    "reviews": "n/a",
+                    "field_lcp": "n/a", "field_cls": "n/a", "field_inp": "n/a", "field_fcp": "n/a",
+                    "field_speed_problem": "⚪ n/a", "field_ux_problem": "⚪ n/a",
+                    "perf_score": "n/a", "issues": "Analysis timed out", "category": "n/a",
+                    "accessibility": "n/a", "best_practices": "n/a", "seo": "n/a",
+                    "concatenated_reviews": "n/a",
+                    "title": "n/a",
+                    "mobile": "n/a",
+                    "mobile_lcp": "n/a",
+                    "mobile_cls": "n/a",
+                    "mobile_inp": "n/a",
+                    "desktop": "n/a",
+                    "desktop_lcp": "n/a",
+                    "desktop_cls": "n/a",
+                    "desktop_inp": "n/a",
+                    "lab_speed_problem": "⚪ n/a", "lab_ux_problem": "⚪ n/a",
+                    "fh_score": "n/a",
+                    "rating": "Error",
+                    "img_sav_kb": "n/a", "js_sav_kb": "n/a", "css_sav_kb": "n/a",
+                    "photo_url": "n/a",
+                    "fh_site": business.get('fh_site', ''),
+                    "account_tier": business.get('account_tier', ''),
+                    "latitude": "n/a",
+                    "longitude": "n/a"
+                }
+            
+            row['region'] = business['region']
+            row['fh_site'] = business['fh_site']  # Add fh_site to output
+            row['account_tier'] = business['account_tier']  # Add account_tier to output
+            results.append(row)
+            processed_count += 1
+            print(f"✅ Data collected for '{OUTPUT_CSV}'")
+            
+        except Exception as e:
+            failed_count += 1
+            print(f"❌ Failed to process {business['domain']}: {e}")
+            # Add error row to results
+            error_row = {
+                "shortname": business['domain'],
+                "website": f"https://{business['domain']}",
+                "region": "",
+                "rating_google": "n/a",
+                "reviews": "n/a",
+                "field_lcp": "n/a", "field_cls": "n/a", "field_inp": "n/a", "field_fcp": "n/a",
+                "field_speed_problem": "⚪ n/a", "field_ux_problem": "⚪ n/a",
+                "perf_score": "n/a", "issues": f"Processing failed: {str(e)}", "category": "n/a",
+                "accessibility": "n/a", "best_practices": "n/a", "seo": "n/a",
+                "concatenated_reviews": "n/a",
+                "title": "n/a",
+                "mobile": "n/a",
+                "mobile_lcp": "n/a",
+                "mobile_cls": "n/a",
+                "mobile_inp": "n/a",
+                "desktop": "n/a",
+                "desktop_lcp": "n/a",
+                "desktop_cls": "n/a",
+                "desktop_inp": "n/a",
+                "lab_speed_problem": "⚪ n/a", "lab_ux_problem": "⚪ n/a",
+                "fh_score": "n/a",
+                "rating": "Error",
+                "img_sav_kb": "n/a", "js_sav_kb": "n/a", "css_sav_kb": "n/a",
+                "photo_url": "n/a",
+                "fh_site": business.get('fh_site', ''),
+                "account_tier": business.get('account_tier', ''),
+                "latitude": "n/a",
+                "longitude": "n/a"
+            }
+            results.append(error_row)
+
+    # Final progress bar
+    print_progress_bar(total_businesses, total_businesses)
+    print(f"\n\n{'='*60}")
+    print(f"🎉 ANALYSIS COMPLETE!")
+    print(f"📊 Processed: {processed_count}/{total_businesses} businesses successfully")
+    print(f"❌ Failed: {failed_count}/{total_businesses} businesses")
+    print(f"📋 Results saved to: '{OUTPUT_CSV}'")
+    print(f"🔧 Reliability features enabled:")
+    print(f"   - Retry mechanism for API calls")
+    print(f"   - Exponential backoff for failures")
+    print(f"{'='*60}")
+
+    export_to_csv(results)
 
 if __name__ == "__main__":
     main() 
