@@ -1,29 +1,53 @@
-name: Website Audit
+name: Website Performance Audit
+
 on:
+  workflow_dispatch:  # Manual trigger
   push:
-    paths: ['sites.csv']
-  workflow_dispatch:
+    paths:
+      - 'sites1.csv'  # Trigger when CSV changes
 
 jobs:
   audit:
     runs-on: ubuntu-latest
+    
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.9'
-      - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4
-      - name: Run audit
-        env:
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-        run: python Sites_Performance.py
-      - name: Debug output dir
-        run: ls -l output
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        with:
-          name: audit-results
-          path: output/
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Debug - List files in root
+      run: |
+        echo "Files in root directory:"
+        ls -la
+        
+    - name: Debug - Check CSV file
+      run: |
+        echo "CSV file contents:"
+        head -5 sites1.csv
+        
+    - name: Run performance audit
+      env:
+        GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      run: |
+        python Sites_Performance.py
+        
+    - name: Debug - List output directory
+      run: |
+        echo "Files in output directory:"
+        ls -la output/ || echo "Output directory not found"
+        
+    - name: Upload results as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: audit-results
+        path: output/
+        retention-days: 30 
