@@ -9,8 +9,13 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # === CONFIG ===
-with open("Google_api_Key.txt", "r") as f:
-    GOOGLE_API_KEY = f.read().strip()
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    raise RuntimeError(
+        "GOOGLE_API_KEY environment variable not found. "
+        "Add it locally (es: `export GOOGLE_API_KEY=...`) "
+        "o configura il secret su GitHub Actions."
+    )
 
 INPUT_CSV = "input/sites.csv"  # CSV file to read from
 OUTPUT_CSV = "output/website_audit_results.csv"  # CSV file to write to
