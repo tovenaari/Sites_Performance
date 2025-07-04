@@ -34,6 +34,11 @@ jobs:
         echo "CSV file contents:"
         head -5 sites1.csv
         
+    - name: Clean output directory
+      run: |
+        rm -rf output
+        mkdir -p output
+        
     - name: Run performance audit
       env:
         GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
