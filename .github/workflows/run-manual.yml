@@ -19,9 +19,9 @@ jobs:
       - name: Run audit
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-        run: python "Site_Scraper+Audit_Data V3_ GITHUBACTION.py"
+        run: python Site_Scraper_Audit_Data_V3_GITHUBACTION.py
       - name: Upload results
         uses: actions/upload-artifact@v4
         with:
           name: audit-results
-          path: output/website_audit_results.csv
+          path: output/website_audit_results.csv 
