@@ -1,5 +1,7 @@
 name: Website Audit
 on:
+  push:
+    paths: ['sites.csv']
   workflow_dispatch:
 
 jobs:
