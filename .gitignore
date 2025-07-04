@@ -1,0 +1,13 @@
+ ⚙️  Config & secrets
+Google_api_Key.txt      
+.env                    
+token_gsheets_user.*    
+
+# 🗃️  File di output
+/output/
+*.csv
+
+# 🛠️  Python
+__pycache__/
+*.py[cod]
+.venv/
