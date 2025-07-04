@@ -19,7 +19,7 @@ if not GOOGLE_API_KEY:
 
 INPUT_CSV = "sites1.csv"  # CSV file to read from root
 OUTPUT_CSV = "output/website_audit_results.csv"  # CSV file to write to
-MAX_BUSINESSES = 5    # Processa solo i primi 5 business
+MAX_BUSINESSES = None    # Processa tutti i business
 
 # === RELIABILITY CONFIG ===
 BATCH_SIZE = 5              # Write to CSV every N businesses
