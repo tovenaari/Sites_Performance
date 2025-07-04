@@ -1,45 +1,27 @@
-name: Website Audit CSV
-
-# ► parte manuale: puoi avviarlo dal tab “Actions” cliccando ‘Run workflow’
+name: Website Audit
 on:
+  push:
+    paths: ['input/sites.csv']
   workflow_dispatch:
-    inputs:
-      csv_path:
-        description: 'Percorso CSV da processare (facoltativo)'
-        required: false
-        default: 'input/sites.csv'
 
 jobs:
   audit:
     runs-on: ubuntu-latest
-
     steps:
-      # 1) Clona il repo
-      - name: 📥 Checkout repo
-        uses: actions/checkout@v4
-
-      # 2) Imposta Python
-      - name: 🐍 Setup Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-
-      # 3) Opzionale: installa dipendenze (se hai un requirements.txt)
-      - name: 📦 Install requirements
-        if: hashFiles('requirements.txt') != ''
-        run: pip install -r requirements.txt
-
-      # 4) Lancia lo script
-      - name: 🚀 Run website audit
-        env:
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}   # <-- usa il secret
+          python-version: '3.9'
+      - name: Install dependencies
         run: |
-          python website_audit.py \
-            --input "${{ github.event.inputs.csv_path }}" || true   # non bloccare il job in caso di errori singoli
-
-      # 5) Carica l’output come artefatto
-      - name: 📤 Upload results
-        uses: actions/upload-artifact@v3
+          pip install requests beautifulsoup4
+      - name: Run audit
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+        run: python "Site_Scraper+Audit_Data V3_ GITHUBACTION.py"
+      - name: Upload results
+        uses: actions/upload-artifact@v4
         with:
-          name: website_audit_results
+          name: audit-results
           path: output/website_audit_results.csv
