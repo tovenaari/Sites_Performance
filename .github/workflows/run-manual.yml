@@ -1,25 +1,45 @@
-name: Run Python Script Manually
+name: Website Audit CSV
 
+# ► parte manuale: puoi avviarlo dal tab “Actions” cliccando ‘Run workflow’
 on:
-  workflow_dispatch:  # 👈 Attiva il pulsante "Run workflow"
+  workflow_dispatch:
+    inputs:
+      csv_path:
+        description: 'Percorso CSV da processare (facoltativo)'
+        required: false
+        default: 'input/sites.csv'
 
 jobs:
-  run-script:
+  audit:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      # 1) Clona il repo
+      - name: 📥 Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Set up Python
+      # 2) Imposta Python
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+      # 3) Opzionale: installa dipendenze (se hai un requirements.txt)
+      - name: 📦 Install requirements
+        if: hashFiles('requirements.txt') != ''
+        run: pip install -r requirements.txt
 
-      - name: Run Python script
+      # 4) Lancia lo script
+      - name: 🚀 Run website audit
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}   # <-- usa il secret
         run: |
-          python Sites_Performance.py
+          python website_audit.py \
+            --input "${{ github.event.inputs.csv_path }}" || true   # non bloccare il job in caso di errori singoli
+
+      # 5) Carica l’output come artefatto
+      - name: 📤 Upload results
+        uses: actions/upload-artifact@v3
+        with:
+          name: website_audit_results
+          path: output/website_audit_results.csv
