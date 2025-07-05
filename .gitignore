@@ -6,6 +6,10 @@ token_gsheets_user.*
 # 🗃️  File di output
 /output/
 *.csv
+!Site Score V1 - 1.csv
+!Site Score V1 - 2.csv
+!Site Score V1 - 3.csv
+!Site Score V1 - 4.csv
 
 # 🛠️  Python
 __pycache__/
