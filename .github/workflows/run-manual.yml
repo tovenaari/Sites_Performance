@@ -1,14 +1,23 @@
-name: Website Performance Audit
+name: Website Performance Audit Matrix
 
 on:
   workflow_dispatch:  # Manual trigger
   push:
     paths:
-      - 'sites1.csv'  # Trigger when CSV changes
+      - 'Site Score V1 - *.csv'  # Trigger when any CSV changes
 
 jobs:
-  audit:
+  audit-matrix:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        csv_file: [
+          'Site Score V1 - 1.csv',
+          'Site Score V1 - 2.csv', 
+          'Site Score V1 - 3.csv',
+          'Site Score V1 - 4.csv'
+        ]
+      fail-fast: false  # Continue even if one job fails
     
     steps:
     - name: Checkout code
@@ -22,7 +31,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 urllib3
+        pip install requests beautifulsoup4 urllib3 pandas openpyxl
         
     - name: Debug - List files in root
       run: |
@@ -31,28 +40,35 @@ jobs:
         
     - name: Debug - Check CSV file
       run: |
+        echo "Processing CSV file: ${{ matrix.csv_file }}"
         echo "CSV file contents:"
-        head -5 sites1.csv
+        head -5 "${{ matrix.csv_file }}"
         
     - name: Clean output directory
       run: |
         rm -rf output
         mkdir -p output
         
+    - name: Copy CSV to sites1.csv for processing
+      run: |
+        cp "${{ matrix.csv_file }}" sites1.csv
+        echo "Copied ${{ matrix.csv_file }} to sites1.csv for processing"
+        
     - name: Run performance audit
       env:
         GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       run: |
+        echo "Running audit for ${{ matrix.csv_file }}"
         python Sites_Performance.py
         
     - name: Debug - List output directory
       run: |
-        echo "Files in output directory:"
+        echo "Files in output directory after processing ${{ matrix.csv_file }}:"
         ls -la output/ || echo "Output directory not found"
         
-    - name: Upload results as artifact
+    - name: Upload results as artifact for ${{ matrix.csv_file }}
       uses: actions/upload-artifact@v4
       with:
-        name: audit-results
+        name: audit-results-${{ matrix.csv_file }}
         path: output/
         retention-days: 30 
