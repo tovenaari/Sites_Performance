@@ -148,7 +148,10 @@ def export_csv(rows: List[Dict[str, Any]], out_path: str):
     if not rows:
         print("⚠️ No data to export")
         return
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(out_path).parent
+    if out_dir.exists() and out_dir.is_file():
+        out_dir.unlink()
+    out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
