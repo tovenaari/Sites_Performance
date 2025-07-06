@@ -12,9 +12,7 @@ jobs:
     strategy:
       matrix:
         csv_file: [
-          'Site Score V1 - Sheet25.csv',
-          'Site Score V1 - Sheet26.csv'
-        ]
+          '234_yes_emea.csv']
       fail-fast: false  # Continue even if one job fails
     
     steps:
