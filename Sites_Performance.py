@@ -17,7 +17,7 @@ if not GOOGLE_API_KEY:
         "o configura il secret su GitHub Actions."
     )
 
-INPUT_CSV = "sites1.csv"  # CSV file to read from root
+INPUT_CSV = "234_yes_emea.csv"  # CSV file to read from root
 OUTPUT_CSV = "output/website_audit_results.csv"  # CSV file to write to
 MAX_BUSINESSES = None    # Processa tutti i business
 
