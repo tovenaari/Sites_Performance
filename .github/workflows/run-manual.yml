@@ -12,8 +12,9 @@ jobs:
     strategy:
       matrix:
         csv_file: [
-          'Site Score V1 - Sheet26.csv',
-          'Site Score V1 - Sheet25.csv']
+          'Site Score V1 - Sheet25.csv',
+          'Site Score V1 - Sheet26.csv'
+        ]
       fail-fast: false  # Continue even if one job fails
     
     steps:
@@ -68,4 +69,50 @@ jobs:
       with:
         name: audit-results-${{ matrix.csv_file }}
         path: output/
-        retention-days: 30 
+        retention-days: 30
+
+  commit-results:
+    needs: audit-matrix
+    runs-on: ubuntu-latest
+    if: always()  # Run even if some matrix jobs failed
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts/
+        
+    - name: Create results directory
+      run: |
+        mkdir -p results
+        echo "Created results directory"
+        
+    - name: Extract and organize results
+      run: |
+        echo "Extracting artifacts..."
+        for artifact in artifacts/audit-results-*; do
+          if [ -d "$artifact" ]; then
+            csv_name=$(basename "$artifact" | sed 's/audit-results-//')
+            echo "Processing $csv_name"
+            mkdir -p "results/$csv_name"
+            cp -r "$artifact"/* "results/$csv_name/" 2>/dev/null || echo "No files to copy for $csv_name"
+          fi
+        done
+        
+    - name: List organized results
+      run: |
+        echo "Final results structure:"
+        find results/ -type f | head -20
+        
+    - name: Commit and push results
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add results/
+        git commit -m "Add audit results from matrix workflow - $(date)" || echo "No changes to commit"
+        git push 
