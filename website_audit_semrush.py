@@ -134,13 +134,38 @@ def analyze_domain(domain: str) -> Dict[str, Any]:
 
 
 def load_input(path: str) -> List[str]:
-    domains = []
+    """Extract domains from CSV.
+    Priority order:
+    1. Column named 'name' (legacy)
+    2. Column named 'shortname'  ⚑ NEW
+    3. Column named 'website'
+    4. Any field that already contains a dot ('.')  → looks like a domain
+    If we still can't find a dot, append '.com' as a last‑chance fallback.
+    """
+    domains: List[str] = []
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            # Use 'name' if available, fallback to second column
-            domain = row.get("name") or list(row.values())[1] if len(row.values()) > 1 else ""
-            domain = domain.strip()
+            # 1️⃣ direct column names
+            domain = (
+                row.get("name")
+                or row.get("shortname")
+                or row.get("website")
+                or ""
+            ).strip()
+
+            # 2️⃣ If still empty, search any value that already looks like a domain
+            if not domain:
+                for val in row.values():
+                    val = str(val).strip()
+                    if "." in val:  # rudimentary domain check
+                        domain = val
+                        break
+
+            # 3️⃣ Fallback – if no dot, assume .com
+            if domain and "." not in domain:
+                domain += ".com"
+
             if domain:
                 domains.append(domain)
     return domains
