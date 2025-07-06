@@ -1,129 +1,182 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SEO Visibility Audit – SEMrush-only
-===================================
+Website Audit – SEMrush‑only
+----------------------------
+This script reads all domains from an input CSV (default: `sites1.csv`),
+queries SEMrush APIs, and writes selected KPIs to
+`output/website_audit_results.csv`.
 
-Reads up to three domains from an input CSV, pulls SEMrush data
-(domain_ranks + backlinks_overview + domain_adwords) and writes the
-results to `output/website_audit_results.csv`.
+Core KPIs collected per domain:
+- **Authority Score** – from domain_ranks
+- **Organic Traffic** – estimated organic visits
+- **Organic Keywords** – number of keywords ranked
+- **Backlinks** – total backlinks (from backlinks_overview)
+- **Paid Traffic Estimate** – estimated monthly paid search traffic (from domain_adwords)
 
-Add or rename columns freely – the workflow never relies on a fixed header.
+Requisites:
+- `requests`
+- GitHub Actions secret: `SEMRUSH_API_KEY`
 """
-import csv, time, argparse
+import csv
+import os
+import time
+import argparse
 from pathlib import Path
 from typing import Dict, List, Any
+
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# ──────────────────────────────────  CONFIG  ──────────────────────────────────
-SEMRUSH_KEY_PATH = Path(__file__).parent / "semrush_api_key.txt"
-if not SEMRUSH_KEY_PATH.exists():
-    raise RuntimeError("🔑  semrush_api_key.txt not found")
+SEMRUSH_API_KEY = os.getenv("SEMRUSH_API_KEY")
+if not SEMRUSH_API_KEY:
+    raise RuntimeError("Missing SEMRUSH_API_KEY environment variable. Configure it as a GitHub Actions secret.")
 
-SEMRUSH_API_KEY = SEMRUSH_KEY_PATH.read_text(errors="ignore").strip().lstrip("\ufeff")
-INPUT_CSV_DEFAULT  = "sites1.csv"
+INPUT_CSV_DEFAULT = "sites1.csv"
 OUTPUT_CSV_DEFAULT = "output/website_audit_results.csv"
-MAX_DOMAINS        = 3          # bump to None when you’re done testing
-RETRY_ATTEMPTS     = 3
-RETRY_DELAY        = 2
-API_DELAY          = 1
+RETRY_ATTEMPTS = 3
+RETRY_DELAY = 2
+API_DELAY = 1
 
-# ─────────────────────────────── HTTP session with retry ──────────────────────
-def make_session() -> requests.Session:
-    retry = Retry(
-        total=RETRY_ATTEMPTS,
-        backoff_factor=RETRY_DELAY,
-        status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET"],
-    )
+def create_session() -> requests.Session:
+    retry = Retry(total=RETRY_ATTEMPTS,
+                  backoff_factor=RETRY_DELAY,
+                  status_forcelist=[429, 500, 502, 503, 504],
+                  allowed_methods=["GET", "HEAD"])
+    adapter = HTTPAdapter(max_retries=retry)
     s = requests.Session()
-    s.mount("https://", HTTPAdapter(max_retries=retry))
+    s.mount("http://", adapter)
+    s.mount("https://", adapter)
     return s
 
-S = make_session()
+SESSION = create_session()
 
-# ──────────────────────────────  SEMrush helpers  ─────────────────────────────
-API = "https://api.semrush.com/"
 
-def csv_request(params: Dict[str, Any]) -> Dict[str, str]:
-    """Return the first (only) row as a dict; empty dict if no data."""
-    params["key"] = SEMRUSH_API_KEY
-    r = S.get(API, params=params, timeout=30)
+def fetch_domain_ranks(domain: str) -> Dict[str, Any]:
+    params = {
+        "key": SEMRUSH_API_KEY,
+        "domain": domain,
+        "type": "domain_ranks",
+        "export": "api",
+        "display_limit": 1,
+    }
+    r = SESSION.get("https://api.semrush.com/", params=params, timeout=30)
     time.sleep(API_DELAY)
-    rows = r.text.strip().splitlines()
-    if len(rows) < 2:
+    lines = r.text.strip().split("\n")
+    if len(lines) < 2:
         return {}
-    header, values = rows[0].split(";"), rows[1].split(";")
-    return dict(zip(header, values))
+    keys, values = lines[0].split(";"), lines[1].split(";")
+    return dict(zip(keys, values))
 
-def domain_ranks(domain: str)          -> Dict[str, str]:
-    return csv_request({"type": "domain_ranks", "domain": domain, "export": "api"})
 
-def backlinks_overview(domain: str)    -> Dict[str, str]:
-    return csv_request({
-        "type": "backlinks_overview",
+def fetch_backlinks_overview(domain: str) -> Dict[str, Any]:
+    params = {
+        "key": SEMRUSH_API_KEY,
         "target": domain,
-        "target_type": "root_domain",
-        "export": "api"
-    })
+        "type": "backlinks_overview",
+        "export": "api",
+        "target_type": "root_domain"
+    }
+    r = SESSION.get("https://api.semrush.com/", params=params, timeout=30)
+    time.sleep(API_DELAY)
+    lines = r.text.strip().split("\n")
+    if len(lines) < 2:
+        return {}
+    keys, values = lines[0].split(";"), lines[1].split(";")
+    return dict(zip(keys, values))
 
-def adwords_overview(domain: str)      -> Dict[str, str]:
-    # only one row (totals) – will be empty if no Ads
-    return csv_request({"type": "domain_adwords", "domain": domain, "display_limit": 1})
 
-# ───────────────────────────────  Domain audit  ───────────────────────────────
-def audit(domain: str) -> Dict[str, Any]:
-    ranks      = domain_ranks(domain)
-    links      = backlinks_overview(domain)
-    ads        = adwords_overview(domain)
+def fetch_adwords_overview(domain: str) -> Dict[str, Any]:
+    params = {
+        "key": SEMRUSH_API_KEY,
+        "domain": domain,
+        "type": "domain_adwords",
+        "export": "api",
+        "display_limit": 1
+    }
+    r = SESSION.get("https://api.semrush.com/", params=params, timeout=30)
+    time.sleep(API_DELAY)
+    lines = r.text.strip().split("\n")
+    if len(lines) < 2:
+        return {}
+    keys, values = lines[0].split(";"), lines[1].split(";")
+    return dict(zip(keys, values))
+
+
+def analyze_domain(domain: str) -> Dict[str, Any]:
+    print(f"🔍 Processing {domain}…")
+    try:
+        ranks = fetch_domain_ranks(domain)
+    except Exception as e:
+        print(f"⚠️ domain_ranks failed: {e}")
+        ranks = {}
+
+    try:
+        backlinks = fetch_backlinks_overview(domain)
+    except Exception as e:
+        print(f"⚠️ backlinks_overview failed: {e}")
+        backlinks = {}
+
+    try:
+        adwords = fetch_adwords_overview(domain)
+    except Exception as e:
+        print(f"⚠️ adwords_overview failed: {e}")
+        adwords = {}
 
     return {
-        "domain"              : domain,
-        "sem_authority_score" : ranks.get("Authority Score",  "n/a"),
-        "sem_organic_traffic" : ranks.get("Organic Traffic",  "n/a"),
+        "domain": domain,
+        "sem_authority_score": ranks.get("Authority Score", "n/a"),
+        "sem_organic_traffic": ranks.get("Organic Traffic", "n/a"),
         "sem_organic_keywords": ranks.get("Organic Keywords", "n/a"),
-        "sem_backlinks"       : links.get("Backlinks",        "n/a"),
-        "paid_traffic_est"    : ads.get("Traffic",            "n/a"),
+        "sem_backlinks": backlinks.get("Backlinks", "n/a"),
+        "paid_traffic_est": adwords.get("Paid Traffic", "n/a"),
     }
 
-# ───────────────────────────── CSV I/O convenience ────────────────────────────
-def load_domains(path: str) -> List[str]:
-    out: List[str] = []
+
+def load_input(path: str) -> List[str]:
+    domains = []
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
-            d = (row.get("name") or row.get("domain") or "").strip()
-            if d:
-                out.append(d)
-            if MAX_DOMAINS and len(out) >= MAX_DOMAINS:
-                break
-    return out
+            domain = row.get("name") or row.get("domain") or ""
+            domain = domain.strip()
+            if domain:
+                domains.append(domain)
+    return domains
 
-def save(rows: List[Dict[str, Any]], dest: str) -> None:
-    Path(dest).parent.mkdir(parents=True, exist_ok=True)
+
+def export_csv(rows: List[Dict[str, Any]], out_path: str):
     if not rows:
-        print("⚠️  Nothing to export.")
+        print("⚠️ No data to export")
         return
-    with open(dest, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        w.writeheader(); w.writerows(rows)
-    print(f"✅  Saved {len(rows)} rows to {dest}")
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    print(f"✅ Exported {len(rows)} rows to {out_path}")
 
-# ───────────────────────────────────  CLI  ────────────────────────────────────
-def main() -> None:
-    p = argparse.ArgumentParser()
-    p.add_argument("--input",  default=INPUT_CSV_DEFAULT,
-                   help="CSV containing a 'name' or 'domain' column")
-    p.add_argument("--output", default=OUTPUT_CSV_DEFAULT,
-                   help="Where to write the audit results")
-    args = p.parse_args()
 
-    domains = load_domains(args.input)
-    print(f"🔢  Auditing {len(domains)} domain(s)…")
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input", default=INPUT_CSV_DEFAULT)
+    parser.add_argument("--output", default=OUTPUT_CSV_DEFAULT)
+    args = parser.parse_args()
 
-    results = [audit(d) for d in domains]
-    save(results, args.output)
+    print(f"📥 Loading input from {args.input}")
+    domains = load_input(args.input)
+    print(f"🔢 Found {len(domains)} domains")
+
+    results = []
+    for idx, domain in enumerate(domains, 1):
+        print(f"\n[{idx}] {domain}")
+        try:
+            results.append(analyze_domain(domain))
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            results.append({"domain": domain, "error": str(e)})
+
+    export_csv(results, args.output)
+
 
 if __name__ == "__main__":
     main()
