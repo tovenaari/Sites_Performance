@@ -31,9 +31,13 @@ jobs:
       run: |
         echo "Processing file: ${{ matrix.csv_file }}"
         head -5 "${{ matrix.csv_file }}"
-
-    - name: Prepare output directory
-      run: mkdir -p output
+- name: Prepare output directory
+  run: |
+    if [ -f output ]; then
+      echo "⚠️ 'output' esiste come file. Rimuovo..."
+      rm output
+    fi
+    mkdir -p output
 
     - name: Copy CSV to standard filename for script
       run: cp "${{ matrix.csv_file }}" sites1.csv
