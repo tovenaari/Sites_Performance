@@ -1,17 +1,17 @@
 name: SEO Visibility Audit Matrix
 
 on:
-  workflow_dispatch:    # manual trigger via GitHub UI
+  workflow_dispatch:
   push:
     paths:
-      - 'Site Score V1 - EMEAnoFHS.csv'  # trigger automatico su modifiche al CSV
+      - 'Site Score V1 - EMEAnoFHS.csv'  # trigger automatico se cambia il file
 
 jobs:
   audit-matrix:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        csv_file: ['Site Score V1 - EMEAnoFHS.csv']  # lista dei file da processare
+        csv_file: ['Site Score V1 - EMEAnoFHS.csv']
       fail-fast: false
 
     steps:
@@ -23,7 +23,7 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Python requirements
+    - name: Install Python dependencies
       run: |
         pip install requests urllib3
 
@@ -31,18 +31,21 @@ jobs:
       run: |
         echo "Processing file: ${{ matrix.csv_file }}"
         head -5 "${{ matrix.csv_file }}"
-- name: Prepare output directory
-  run: |
-    if [ -f output ]; then
-      echo "⚠️ 'output' esiste come file. Rimuovo..."
-      rm output
-    fi
-    mkdir -p output
 
-    - name: Copy CSV to standard filename for script
+    - name: Prepare output directory (safe mkdir)
+      run: |
+        if [ -f output ]; then
+          echo "⚠️ 'output' esiste come file. Lo rimuovo..."
+          rm output
+        fi
+        mkdir -p output
+
+    - name: Copy CSV to standard filename
       run: cp "${{ matrix.csv_file }}" sites1.csv
 
-    - name: Run SEMrush visibility audit
+    - name: Run SEMrush audit
+      env:
+        SEMRUSH_API_KEY: ${{ secrets.SEMRUSH_API_KEY }}
       run: |
         python website_audit_semrush.py --input sites1.csv --output output/results.csv
 
