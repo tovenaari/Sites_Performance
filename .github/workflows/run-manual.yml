@@ -12,11 +12,8 @@ jobs:
     strategy:
       matrix:
         csv_file: [
-          'Site Score V1 - 1.csv',
-          'Site Score V1 - 2.csv', 
-          'Site Score V1 - 3.csv',
-          'Site Score V1 - 4.csv'
-        ]
+          'Site Score V1 - Sheet26.csv',
+          'Site Score V1 - Sheet25.csv']
       fail-fast: false  # Continue even if one job fails
     
     steps:
