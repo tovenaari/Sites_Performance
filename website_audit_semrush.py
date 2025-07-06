@@ -136,8 +136,10 @@ def analyze_domain(domain: str) -> Dict[str, Any]:
 def load_input(path: str) -> List[str]:
     domains = []
     with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            domain = row.get("name") or row.get("domain") or ""
+        reader = csv.DictReader(f)
+        for row in reader:
+            # Use 'name' if available, fallback to second column
+            domain = row.get("name") or list(row.values())[1] if len(row.values()) > 1 else ""
             domain = domain.strip()
             if domain:
                 domains.append(domain)
