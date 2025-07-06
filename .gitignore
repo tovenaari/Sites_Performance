@@ -1,11 +1,19 @@
- ⚙️  Config & secrets
-Google_api_Key.txt      
-.env                    
-token_gsheets_user.*    
+# ⚙️  Config & secrets
+Google_api_Key.txt
+.env
+token_gsheets_user.*
 
 # 🗃️  File di output
 /output/
 
+# 📊  Audit input/output files (Excel, CSV)
+*.csv
+*.xls
+*.xlsx
+Site Score V1 - *
+sites*
+234_yes_emea*
+Sheet*.xlsx
 
 # 🛠️  Python
 __pycache__/
