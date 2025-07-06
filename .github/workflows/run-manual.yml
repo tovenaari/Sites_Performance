@@ -1,116 +1,65 @@
 name: Website Performance Audit Matrix
 
 on:
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:  # Lancio manuale
   push:
     paths:
-      - 'Site Score V1 - *.csv'  # Trigger when any CSV changes
+      - '234_yes_emea.csv'  # Lancia il workflow se cambia questo file
 
 jobs:
   audit-matrix:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        csv_file: [
-          '234_yes_emea.csv']
-      fail-fast: false  # Continue even if one job fails
-    
+        csv_file: ['234_yes_emea.csv']
+      fail-fast: false
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
-        
-    - name: Install dependencies
+        python-version: '3.11'
+
+    - name: Install Python dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install requests beautifulsoup4 urllib3 pandas openpyxl
-        
+
     - name: Debug - List files in root
       run: |
         echo "Files in root directory:"
         ls -la
-        
-    - name: Debug - Check CSV file
+
+    - name: Debug - Preview CSV
       run: |
         echo "Processing CSV file: ${{ matrix.csv_file }}"
-        echo "CSV file contents:"
         head -5 "${{ matrix.csv_file }}"
-        
+
     - name: Clean output directory
       run: |
-        rm -rf output
+        if [ -f output ]; then
+          echo "⚠️ 'output' esiste come file. Lo rimuovo..."
+          rm output
+        fi
         mkdir -p output
-        
-    - name: Copy CSV to sites1.csv for processing
-      run: |
-        cp "${{ matrix.csv_file }}" sites1.csv
-        echo "Copied ${{ matrix.csv_file }} to sites1.csv for processing"
-        
+
     - name: Run performance audit
       env:
         GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       run: |
         echo "Running audit for ${{ matrix.csv_file }}"
-        python Sites_Performance.py
-        
-    - name: Debug - List output directory
+        python Sites_Performance.py  # Assicurati che il nome sia corretto
+
+    - name: Debug - Output directory content
       run: |
-        echo "Files in output directory after processing ${{ matrix.csv_file }}:"
+        echo "Output files after processing ${{ matrix.csv_file }}:"
         ls -la output/ || echo "Output directory not found"
-        
-    - name: Upload results as artifact for ${{ matrix.csv_file }}
+
+    - name: Upload results
       uses: actions/upload-artifact@v4
       with:
         name: audit-results-${{ matrix.csv_file }}
         path: output/
         retention-days: 30
-
-  commit-results:
-    needs: audit-matrix
-    runs-on: ubuntu-latest
-    if: always()  # Run even if some matrix jobs failed
-    
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts/
-        
-    - name: Create results directory
-      run: |
-        mkdir -p results
-        echo "Created results directory"
-        
-    - name: Extract and organize results
-      run: |
-        echo "Extracting artifacts..."
-        for artifact in artifacts/audit-results-*; do
-          if [ -d "$artifact" ]; then
-            csv_name=$(basename "$artifact" | sed 's/audit-results-//')
-            echo "Processing $csv_name"
-            mkdir -p "results/$csv_name"
-            cp -r "$artifact"/* "results/$csv_name/" 2>/dev/null || echo "No files to copy for $csv_name"
-          fi
-        done
-        
-    - name: List organized results
-      run: |
-        echo "Final results structure:"
-        find results/ -type f | head -20
-        
-    - name: Commit and push results
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add results/
-        git commit -m "Add audit results from matrix workflow - $(date)" || echo "No changes to commit"
-        git push 
