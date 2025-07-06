@@ -1,0 +1,50 @@
+name: SEO Visibility Audit Matrix
+
+on:
+  workflow_dispatch:    # manual trigger via GitHub UI
+  push:
+    paths:
+      - 'Site Score V1 - EMEAnoFHS.csv'  # trigger automatico su modifiche al CSV
+
+jobs:
+  audit-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        csv_file: ['Site Score V1 - EMEAnoFHS.csv']  # lista dei file da processare
+      fail-fast: false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Python requirements
+      run: |
+        pip install requests urllib3
+
+    - name: Debug input file
+      run: |
+        echo "Processing file: ${{ matrix.csv_file }}"
+        head -5 "${{ matrix.csv_file }}"
+
+    - name: Prepare output directory
+      run: mkdir -p output
+
+    - name: Copy CSV to standard filename for script
+      run: cp "${{ matrix.csv_file }}" sites1.csv
+
+    - name: Run SEMrush visibility audit
+      run: |
+        python website_audit_semrush.py --input sites1.csv --output output/results.csv
+
+    - name: Upload results as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: seo-audit-${{ matrix.csv_file }}
+        path: output/results.csv
+        retention-days: 30
