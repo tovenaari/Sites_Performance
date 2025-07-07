@@ -187,7 +187,6 @@ def export_csv(rows: List[Dict[str, Any]], out_path: str):
         writer.writerows(rows)
     print(f"✅ Exported {len(rows)} rows to {out_path}")
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", default=INPUT_CSV_DEFAULT)
@@ -200,9 +199,7 @@ def main():
 
     results = []
     for idx, domain in enumerate(domains, 1):
-        print(f"
-🔢 [{idx}/{len(domains)}] Processing: {domain}")
-        print(f"\n[{idx}] {domain}")
+        print(f"\n🔢 [{idx}/{len(domains)}] Processing: {domain}")
         try:
             results.append(analyze_domain(domain))
         except Exception as e:
@@ -210,6 +207,7 @@ def main():
             results.append({"domain": domain, "error": str(e)})
 
     export_csv(results, args.output)
+
 
 
 if __name__ == "__main__":
