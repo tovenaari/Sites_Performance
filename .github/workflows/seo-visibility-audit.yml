@@ -1,4 +1,4 @@
-name: SEO Visibility Audit Matrix
+name: Website SEMrush Audit
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       - '234_yes_emea.csv'  # trigger automatico se cambia il file
 
 jobs:
-  audit-matrix:
+  audit-semrush:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -15,43 +15,32 @@ jobs:
       fail-fast: false
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Install dependencies
+        run: pip install requests urllib3
 
-    - name: Install Python dependencies
-      run: |
-        pip install requests urllib3
+      - name: Preview CSV
+        run: head -5 "${{ matrix.csv_file }}"
 
-    - name: Debug input file
-      run: |
-        echo "Processing file: ${{ matrix.csv_file }}"
-        head -5 "${{ matrix.csv_file }}"
+      - name: Prepare output directory
+        run: |
+          if [ -f output ]; then rm output; fi
+          mkdir -p output
 
-    - name: Prepare output directory (safe mkdir)
-      run: |
-        if [ -f output ]; then
-          echo "⚠️ 'output' esiste come file. Lo rimuovo..."
-          rm output
-        fi
-        mkdir -p output
+      - name: Copy CSV to standard filename
+        run: cp "${{ matrix.csv_file }}" sites1.csv
 
-    - name: Copy CSV to standard filename
-      run: cp "${{ matrix.csv_file }}" sites1.csv
+      - name: Run SEMrush audit
+        env:
+          SEMRUSH_API_KEY: ${{ secrets.SEMRUSH_API_KEY }}
+        run: python website_audit_semrush.py --input "${{ matrix.csv_file }}" --output output/results.csv
 
-    - name: Run SEMrush audit
-      env:
-        SEMRUSH_API_KEY: ${{ secrets.SEMRUSH_API_KEY }}
-      run: |
-        python website_audit_semrush.py --input sites1.csv --output output/results.csv
-
-    - name: Upload results as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: seo-audit-${{ matrix.csv_file }}
-        path: output/results.csv
-        retention-days: 30
+      - name: Upload audit results
+        uses: actions/upload-artifact@v4
+        with:
+          name: semrush-audit-${{ matrix.csv_file }}
+          path: output/results.csv
+          retention-days: 30
