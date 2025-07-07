@@ -12,7 +12,6 @@ token_gsheets_user.*
 *.xlsx
 Site Score V1 - *
 sites*
-234_yes_emea*
 Sheet*.xlsx
 
 # 🛠️  Python
