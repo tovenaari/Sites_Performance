@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        csv_file: ['234_yes_emea']
+        csv_file: ['234_yes_emea.csv']
       fail-fast: false
 
     steps:
