@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '234_yes_emea.csv'
+      - 'yes_emea_234.csv'
 
 jobs:
   audit-semrush:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        csv_file: ['234_yes_emea.csv']
+        csv_file: ['yes_emea_234.csv']
       fail-fast: false
 
     steps:
