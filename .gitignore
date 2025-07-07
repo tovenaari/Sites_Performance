@@ -7,7 +7,6 @@ token_gsheets_user.*
 /output/
 
 # 📊  Audit input/output files (Excel, CSV)
-*.csv
 *.xls
 *.xlsx
 Site Score V1 - *
