@@ -200,6 +200,8 @@ def main():
 
     results = []
     for idx, domain in enumerate(domains, 1):
+        print(f"
+🔢 [{idx}/{len(domains)}] Processing: {domain}")
         print(f"\n[{idx}] {domain}")
         try:
             results.append(analyze_domain(domain))
