@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - '234_yes_emea.csv'  # trigger automatico se cambia il file
+      - '234_yes_emea.csv'
 
 jobs:
   audit-semrush:
@@ -15,9 +15,11 @@ jobs:
       fail-fast: false
 
     steps:
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: List files
+        run: ls -la
 
       - name: Install dependencies
         run: pip install requests urllib3
@@ -29,9 +31,6 @@ jobs:
         run: |
           if [ -f output ]; then rm output; fi
           mkdir -p output
-
-      - name: Copy CSV to standard filename
-        run: cp "${{ matrix.csv_file }}" sites1.csv
 
       - name: Run SEMrush audit
         env:
