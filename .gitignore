@@ -1,19 +1,24 @@
-# ⚙️  Config & secrets
+#   Config & secrets
 Google_api_Key.txt
 .env
 token_gsheets_user.*
 
-# 🗃️  File di output
+#   File di output
 /output/
 
-# 📊  Audit input/output files (Excel, CSV)
+#   Audit input/output files (Excel, CSV)
 *.xls
 *.xlsx
 Site Score V1 - *
-sites*
-Sheet*.xlsx
 
-# 🛠️  Python
+# Ignore old site input files (V1)
+sites.csv
+sites1.csv
+
+#  Allow the new SiteScraper2 input file
+!input/sites_sitescraper2.csv
+
+#   Python
 __pycache__/
 *.py[cod]
 .venv/

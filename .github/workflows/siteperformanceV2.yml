@@ -1,0 +1,75 @@
+name: SitePerformance – SiteScraper2
+
+on:
+  workflow_dispatch:
+    inputs:
+      input_csv:
+        description: "Path to input CSV file"
+        required: true
+        default: "SiteScraper2/input/Input_csv_Sep25.csv"
+      output_csv:
+        description: "Path to output CSV file"
+        required: true
+        default: "SiteScraper2/output/SiteScore2.csv"
+
+concurrency:
+  group: sitescraper2-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  run-sitescraper2:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('SiteScraper2/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install requirements (if present)
+        run: |
+          if [ -f "SiteScraper2/requirements.txt" ]; then
+            pip install -r SiteScraper2/requirements.txt
+          else
+            echo "No requirements.txt found in SiteScraper2/, skipping."
+          fi
+
+      - name: Prepare output folder
+        run: mkdir -p "$(dirname '${{ github.event.inputs.output_csv }}')"
+
+      - name: Validate input file exists
+        run: |
+          if [ ! -f "${{ github.event.inputs.input_csv }}" ]; then
+            echo "❌ Input file not found: ${{ github.event.inputs.input_csv }}"
+            exit 1
+          fi
+          echo "✅ Input file found: ${{ github.event.inputs.input_csv }}"
+
+      - name: Run SiteScraper2 script
+        env:
+          INPUT_CSV: ${{ github.event.inputs.input_csv }}
+          OUTPUT_CSV: ${{ github.event.inputs.output_csv }}
+          PRIMARY_URL_FIELD: "Main_URL"   # column to start analyses from (as requested)
+          PROCESS_SCOPE: "first_only"     # process only the first domain found
+        run: |
+          python SiteScraper2/sitescraperv2_Sept_25.py --input "$INPUT_CSV" --output "$OUTPUT_CSV"
+
+      - name: Upload output artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SiteScore2
+          path: ${{ github.event.inputs.output_csv }}
+          if-no-files-found: error
